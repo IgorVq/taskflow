@@ -1,0 +1,140 @@
+name: CI
+
+on:
+  # Aucun filtre de chemins sur les PR : les checks requis doivent toujours être publiés,
+  # sinon une PR qui ne touche que le README resterait bloquée (« Expected — Waiting for status »).
+  pull_request:
+  push:
+    branches: [main]
+    # Sur main seulement : pas de CI complète pour un commit qui ne touche que la doc.
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+
+permissions:
+  contents: read
+
+# Un nouveau push sur une PR annule le run devenu inutile ; sur main, on n'annule jamais
+# (chaque commit de main doit avoir son verdict).
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # Seuil bloquant de couverture des lignes (tests unitaires de l'API) : défini une seule fois ici.
+  COVERAGE_MIN: 75
+
+jobs:
+  api:
+    name: api
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: [20, 22]
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: api
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+          cache-dependency-path: api/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+      - name: Run linter
+        run: npm run lint
+      - name: Check formatting
+        run: npm run format:check
+      - name: Run tests with coverage
+        run: npm run test:coverage
+      - name: Coverage summary (seuil ${{ env.COVERAGE_MIN }} %)
+        env:
+          NODE_VERSION: ${{ matrix.node-version }}
+        run: |
+          summary=coverage/coverage-summary.json
+          {
+            echo "### Couverture de l'API (Node ${NODE_VERSION})"
+            echo ""
+            echo "| Métrique | Couverture |"
+            echo "|---|---|"
+            for metric in lines statements functions branches; do
+              echo "| ${metric} | $(jq -r ".total.${metric}.pct" "$summary") % |"
+            done
+            echo ""
+            echo "Seuil bloquant sur les lignes : **${COVERAGE_MIN} %**"
+          } >> "$GITHUB_STEP_SUMMARY"
+          lines=$(jq -r '.total.lines.pct' "$summary")
+          if awk -v p="$lines" -v min="$COVERAGE_MIN" 'BEGIN { exit !(p < min) }'; then
+            echo "::error title=Couverture insuffisante::lignes ${lines} % < seuil ${COVERAGE_MIN} %"
+            exit 1
+          fi
+          echo "Couverture OK : lignes ${lines} % >= seuil ${COVERAGE_MIN} %"
+  api-integration:
+    name: api-integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env: { POSTGRES_USER: taskflow, POSTGRES_PASSWORD: taskflow, POSTGRES_DB: taskflow }
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U taskflow -d taskflow"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+    env:
+      DATABASE_URL: postgres://taskflow:taskflow@localhost:5432/taskflow
+    defaults:
+      run:
+        working-directory: api
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: api/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+      - name: Run integration tests
+        run: npm run test:int
+  front:
+    name: front
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: front
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: front/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+      - name: Run linter
+        run: npm run lint
+      - name: Check formatting
+        run: npm run format:check
+      - name: Run tests with coverage
+        run: npm run test:coverage
+      - name: Build
+        run: npm run build
+      - name: Upload front-dist artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: front-dist
+          path: front/dist/
+          retention-days: 7
+          if-no-files-found: error
