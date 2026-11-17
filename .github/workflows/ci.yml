@@ -1,12 +1,24 @@
 name: CI
 
 on:
+  # Aucun filtre de chemins sur les PR : les checks requis doivent toujours être publiés,
+  # sinon une PR qui ne touche que le README resterait bloquée (« Expected — Waiting for status »).
   pull_request:
   push:
     branches: [main]
+    # Sur main seulement : pas de CI complète pour un commit qui ne touche que la doc.
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
 
 permissions:
   contents: read
+
+# Un nouveau push sur une PR annule le run devenu inutile ; sur main, on n'annule jamais
+# (chaque commit de main doit avoir son verdict).
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   # Seuil bloquant de couverture des lignes (tests unitaires de l'API) : défini une seule fois ici.
