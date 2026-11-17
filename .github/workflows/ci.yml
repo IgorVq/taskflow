@@ -12,6 +12,10 @@ jobs:
   api:
     name: api
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: [20, 22]
     timeout-minutes: 10
     defaults:
       run:
@@ -22,7 +26,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v7
         with:
-          node-version: 20
+          node-version: ${{ matrix.node-version }}
           cache: npm
           cache-dependency-path: api/package-lock.json
       - name: Install dependencies
