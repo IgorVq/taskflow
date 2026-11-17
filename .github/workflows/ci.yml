@@ -8,6 +8,10 @@ on:
 permissions:
   contents: read
 
+env:
+  # Seuil bloquant de couverture des lignes (tests unitaires de l'API) : défini une seule fois ici.
+  COVERAGE_MIN: 75
+
 jobs:
   api:
     name: api
@@ -37,6 +41,28 @@ jobs:
         run: npm run format:check
       - name: Run tests with coverage
         run: npm run test:coverage
+      - name: Coverage summary (seuil ${{ env.COVERAGE_MIN }} %)
+        env:
+          NODE_VERSION: ${{ matrix.node-version }}
+        run: |
+          summary=coverage/coverage-summary.json
+          {
+            echo "### Couverture de l'API (Node ${NODE_VERSION})"
+            echo ""
+            echo "| Métrique | Couverture |"
+            echo "|---|---|"
+            for metric in lines statements functions branches; do
+              echo "| ${metric} | $(jq -r ".total.${metric}.pct" "$summary") % |"
+            done
+            echo ""
+            echo "Seuil bloquant sur les lignes : **${COVERAGE_MIN} %**"
+          } >> "$GITHUB_STEP_SUMMARY"
+          lines=$(jq -r '.total.lines.pct' "$summary")
+          if awk -v p="$lines" -v min="$COVERAGE_MIN" 'BEGIN { exit !(p < min) }'; then
+            echo "::error title=Couverture insuffisante::lignes ${lines} % < seuil ${COVERAGE_MIN} %"
+            exit 1
+          fi
+          echo "Couverture OK : lignes ${lines} % >= seuil ${COVERAGE_MIN} %"
   api-integration:
     name: api-integration
     runs-on: ubuntu-latest
