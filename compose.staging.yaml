@@ -1,18 +1,4 @@
-# ============================================================================
-# compose.staging.yaml : environnement de STAGING (pré-production) de TaskFlow
-#
-# Il vit dans STAGING_DIR (~/taskflow-staging), avec son propre .env (mot de passe
-# DIFFÉRENT de la prod). Il lance EXACTEMENT les mêmes images que la prod (même
-# IMAGE_TAG), juste avant elle : une release cassée doit mourir ici.
-#
-# Différences de STRUCTURE avec compose.prod.yaml (pas seulement des valeurs) :
-#   1. pas de service proxy, donc pas de HTTPS ni de certificats ;
-#   2. le front publie lui-même son port (http://localhost:8081) ;
-#   3. noms de conteneurs, de volume et de réseau fixés à la main.
-#
-#     COMPOSE_FILE=compose.staging.yaml ./deploy.sh <sha>
-# ============================================================================
-
+# Staging : mêmes images que la prod, sans proxy ni TLS, front sur le port 8081.
 name: taskflow-staging
 
 x-durcissement: &durcissement
@@ -30,11 +16,7 @@ x-sonde: &sonde
   timeout: 3s
   retries: 5
 
-# Noms FIXES (container_name, volume et réseau) : ils ne dépendent plus du nom du
-# projet ni du numéro de réplique. Au Jour 4, OpenTofu décrit ce même environnement
-# et doit retrouver exactement ces noms ; les scripts et la doc peuvent aussi viser
-# « taskflow-staging-api » sans deviner un suffixe -1.
-
+# Noms fixes : repris par OpenTofu au Jour 4.
 services:
   db:
     <<: *durcissement
@@ -53,6 +35,7 @@ services:
   api:
     <<: *durcissement
     image: ghcr.io/${GHCR_OWNER:?GHCR_OWNER absent du .env}/taskflow-api:${IMAGE_TAG:-tag-non-defini}
+    platform: linux/amd64
     container_name: taskflow-staging-api
     environment:
       PORT: "3000"
@@ -69,8 +52,8 @@ services:
   front:
     <<: *durcissement
     image: ghcr.io/${GHCR_OWNER:?GHCR_OWNER absent du .env}/taskflow-front:${IMAGE_TAG:-tag-non-defini}
+    platform: linux/amd64
     container_name: taskflow-staging-front
-    # Pas de proxy en staging : le front (son Nginx relaie déjà /api et /health) est publié.
     ports:
       - "${FRONT_PORT:-8081}:80"
     depends_on:
