@@ -1,0 +1,138 @@
+# ============================================================================
+# compose.prod.yaml : environnement de PRODUCTION de TaskFlow
+#
+# Il vit dans PROD_DIR (~/taskflow-prod), le dossier qui joue le rôle du serveur :
+#   - copié depuis Git (le code)  : ce fichier, nginx/taskflow.conf, les scripts *.sh
+#   - propre au serveur (jamais dans Git) : .env, certs/, backups/, .deployed_tag
+#
+# Ce qui change par rapport à compose.yaml (dev) :
+#   - aucune section `build:` : on lance des images DÉJÀ construites, repérées par
+#     le SHA court du commit (IMAGE_TAG). Build once, deploy many ;
+#   - la configuration vient de l'environnement (.env), pas de l'image (12-factor, III) ;
+#   - un reverse proxy Nginx termine le HTTPS et c'est le SEUL service avec `ports:`.
+#
+#     IMAGE_TAG=<sha> docker compose -f compose.prod.yaml up -d --wait
+#     ./deploy.sh <sha>        # la même chose, plus pull, mémo du tag et reload du proxy
+# ============================================================================
+
+# Nom du projet : préfixe des conteneurs et du volume (taskflow-prod-api-1,
+# taskflow-prod_pgdata). La prod ne se mélange ni au dev ni au staging.
+name: taskflow-prod
+
+# --- Blocs réutilisés (ancres YAML) ------------------------------------------
+# Les clés « x-* » sont ignorées par Compose : on s'en sert pour factoriser.
+x-durcissement: &durcissement
+  restart: unless-stopped
+  # Un processus du conteneur ne peut pas gagner de privilèges (setuid, sudo...).
+  security_opt:
+    - no-new-privileges:true
+  # Logs Docker plafonnés : sans limite, ils finissent par remplir le disque.
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+
+x-sonde: &sonde
+  interval: 10s
+  timeout: 3s
+  retries: 5
+
+# « ${VAR:?message} » (plus bas) : valeur OBLIGATOIRE. Si VAR est absente ou vide,
+# Compose s'arrête avec ce message au lieu de démarrer avec une valeur vide
+# (une base sans mot de passe, une image « ghcr.io//taskflow-api »...).
+#
+# IMAGE_TAG, lui, a un défaut volontairement INVALIDE (tag-non-defini) plutôt que
+# « :? » ou « latest » : `ps`, `logs`, `exec` (et backup.sh) marchent sans tag,
+# mais un `up` lancé sans tag échoue au pull au lieu d'installer en douce la
+# dernière image publiée (latest = pas encore validée en staging).
+
+services:
+  db:
+    <<: *durcissement
+    image: docker.io/library/postgres:16-alpine
+    environment:
+      POSTGRES_USER: taskflow
+      POSTGRES_DB: taskflow
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD absent du .env}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      <<: *sonde
+      test: ["CMD-SHELL", "pg_isready -U taskflow -d taskflow"]
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+
+  api:
+    <<: *durcissement
+    image: ghcr.io/${GHCR_OWNER:?GHCR_OWNER absent du .env}/taskflow-api:${IMAGE_TAG:-tag-non-defini}
+    # On passe à l'API UNIQUEMENT ce dont elle a besoin (pas tout le .env : elle
+    # n'a pas à connaître GHCR_OWNER ni les ports du proxy). DATABASE_URL est
+    # construite ici : le mot de passe n'est écrit qu'une fois dans le .env, donc
+    # impossible d'avoir deux valeurs qui divergent.
+    environment:
+      PORT: "3000"
+      APP_ENV: ${APP_ENV:-production}
+      DATABASE_URL: postgres://taskflow:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD absent du .env}@db:5432/taskflow
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      <<: *sonde
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:3000/health || exit 1"]
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          memory: 256m
+
+  front:
+    <<: *durcissement
+    image: ghcr.io/${GHCR_OWNER:?GHCR_OWNER absent du .env}/taskflow-front:${IMAGE_TAG:-tag-non-defini}
+    # Pas de `ports:` : le front n'est joignable que par le proxy, sur le réseau interne.
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      <<: *sonde
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/ || exit 1"]
+    deploy:
+      resources:
+        limits:
+          memory: 128m
+
+  # Reverse proxy : point d'entrée unique, HTTPS, redirection HTTP -> HTTPS.
+  proxy:
+    <<: *durcissement
+    image: docker.io/library/nginx:1.29-alpine
+    # LE seul service publié. Ports 80/443 pris ou Docker rootless :
+    # HTTP_PORT=8082 et HTTPS_PORT=8443 dans le .env (8080 = dev, 8081 = staging).
+    ports:
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+    volumes:
+      - ./nginx/taskflow.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./certs:/etc/nginx/certs:ro          # générés par gen-cert.sh, jamais dans Git
+    depends_on:
+      front:
+        condition: service_healthy
+    healthcheck:
+      <<: *sonde
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/nginx-health || exit 1"]
+    deploy:
+      resources:
+        limits:
+          memory: 64m
+
+volumes:
+  pgdata:
+
+# Réseau par défaut NOMMÉ : sans `name`, il s'appellerait taskflow-prod_default et
+# changerait avec le nom du projet. Avec un nom fixe, une autre stack (le monitoring
+# du Jour 4) peut le rejoindre en `external: true` et joindre api:3000/metrics
+# sans que l'API soit publiée sur la machine.
+networks:
+  default:
+    name: taskflow-prod

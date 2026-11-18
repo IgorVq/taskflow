@@ -1,0 +1,28 @@
+# ============================================================================
+# Hooks pre-commit : lancés sur VOTRE poste avant chaque `git commit`.
+#   brew install pre-commit      (ou : pipx install pre-commit)
+#   pre-commit install           (une fois par clone)
+#   pre-commit run --all-files   (à la demande, ou après avoir changé ce fichier)
+#
+# But : qu'un secret ne soit JAMAIS commité (shift-left). Un secret poussé est
+# considéré comme fuité, même supprimé au commit suivant : il reste dans l'historique
+# et il faut le révoquer.
+# Limite : un hook local se contourne (--no-verify) ou s'oublie ; il ne remplace
+# pas le scan de secrets en CI (Jour 5).
+# ============================================================================
+repos:
+  # gitleaks : détecte jetons, clés d'API, clés privées, mots de passe connus...
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.1
+    hooks:
+      - id: gitleaks
+
+  # Filets complémentaires, sans configuration
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: detect-private-key          # un taskflow.key commité par erreur
+      - id: check-added-large-files     # un dump de base (backups/) ajouté par erreur
+        args: ["--maxkb=500"]
+      - id: check-yaml                  # compose.*.yaml et workflows syntaxiquement valides
+      - id: check-executables-have-shebangs
