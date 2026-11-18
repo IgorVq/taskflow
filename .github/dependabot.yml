@@ -1,0 +1,54 @@
+# Mises à jour automatiques des dépendances : Dependabot ouvre des PR, la CI les vérifie,
+# un humain relit et merge.
+version: 2
+
+updates:
+  # Dépendances npm de l'API et du front
+  - package-ecosystem: npm
+    directories: ["/api", "/front"]
+    schedule:
+      interval: weekly
+      day: monday
+      time: "07:00"
+      timezone: Europe/Paris
+    # Attendre qu'une version ait quelques jours avant de la proposer : une version
+    # piégée est en général repérée et retirée dans ce délai.
+    cooldown:
+      default-days: 5
+      semver-major-days: 14
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "build(deps)"
+      prefix-development: "build(deps-dev)"
+    groups:
+      # Outils de dev (ESLint, Vitest, Prettier...) : une seule PR pour les mineures et correctifs
+      outils-dev:
+        dependency-type: development
+        update-types: [minor, patch]
+
+  # Images de base des Dockerfile (node, nginx)
+  - package-ecosystem: docker
+    directories: ["/api", "/front"]
+    schedule:
+      interval: weekly
+      day: monday
+      time: "07:00"
+      timezone: Europe/Paris
+    commit-message:
+      prefix: "build(docker)"
+
+  # Actions des workflows : Dependabot met à jour le SHA épinglé ET le commentaire de version
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "07:00"
+      timezone: Europe/Paris
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: "ci(deps)"
+    groups:
+      actions:
+        patterns: ["*"]
