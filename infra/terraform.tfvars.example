@@ -1,0 +1,5 @@
+# cp terraform.tfvars.example terraform.tfvars (ignoré par Git)
+ghcr_owner = "igorvq"
+image_tag  = "latest"
+front_port = 8081
+# Ne pas renseigner la base ici : ci-env.sh fournit TF_VAR_db_password via l'environnement
