@@ -113,6 +113,7 @@ resource "docker_container" "api" {
 }
 
 resource "docker_container" "front" {
+  wait_timeout  = 90
   name          = "${local.prefix}-front"
   image         = docker_image.front.image_id
   restart       = "unless-stopped"
