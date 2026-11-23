@@ -39,10 +39,11 @@ services:
     # Tag par défaut invalide : un `up` sans IMAGE_TAG échoue au lieu de prendre latest.
     image: ghcr.io/${GHCR_OWNER:?GHCR_OWNER absent du .env}/taskflow-api:${IMAGE_TAG:-tag-non-defini}
     platform: linux/amd64
+    # Toute la configuration vient du .env (DATABASE_URL, APP_ENV...).
+    env_file:
+      - .env
     environment:
       PORT: "3000"
-      APP_ENV: ${APP_ENV:-production}
-      DATABASE_URL: postgres://taskflow:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD absent du .env}@db:5432/taskflow
     depends_on:
       db:
         condition: service_healthy
