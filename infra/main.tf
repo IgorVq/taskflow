@@ -129,10 +129,11 @@ resource "docker_container" "front" {
   }
 
   healthcheck {
-    test     = ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/ || exit 1"]
-    interval = local.sonde.interval
-    timeout  = local.sonde.timeout
-    retries  = local.sonde.retries
+    test         = ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/ || exit 1"]
+    interval     = local.sonde.interval
+    timeout      = local.sonde.timeout
+    retries      = local.sonde.retries
+    start_period = "5s" # valeur du HEALTHCHECK de front/Dockerfile
   }
 
   depends_on = [docker_container.api]
