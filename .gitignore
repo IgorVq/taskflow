@@ -24,3 +24,11 @@ backups/
 *.pem
 *.key
 *.crt
+
+# OpenTofu : cache des providers, state (contient des secrets) et plans
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+tfplan
+terraform.tfvars
